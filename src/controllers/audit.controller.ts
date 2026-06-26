@@ -31,7 +31,6 @@ export class AuditController {
         event: formatEvent(event),
       });
     } catch (error) {
-      // Log the actual error for debugging
       console.error("Error creating event:", error);
 
       res.status(500).json({
@@ -49,6 +48,85 @@ export class AuditController {
   }
 
   /**
+   * GET /events
+   * Query events with filters and pagination
+   */
+  async queryEvents(req: Request, res: Response): Promise<void> {
+    try {
+      const filters = {
+        actorId: req.query.actor_id as string | undefined,
+        action: req.query.action as string | undefined,
+        resourceType: req.query.resource_type as string | undefined,
+        resourceId: req.query.resource_id as string | undefined,
+        from: req.query.from as string | undefined,
+        to: req.query.to as string | undefined,
+        limit: req.query.limit
+          ? parseInt(req.query.limit as string)
+          : undefined,
+        offset: req.query.offset
+          ? parseInt(req.query.offset as string)
+          : undefined,
+      };
+
+      // Validate limit and offset if provided
+      if (req.query.limit && (isNaN(filters.limit!) || filters.limit! < 1)) {
+        res.status(400).json({
+          ok: false,
+          errors: [
+            {
+              field: "limit",
+              message: "limit must be a positive integer.",
+              code: "INVALID_PARAMETER",
+            },
+          ],
+        });
+        return;
+      }
+
+      if (req.query.offset && (isNaN(filters.offset!) || filters.offset! < 0)) {
+        res.status(400).json({
+          ok: false,
+          errors: [
+            {
+              field: "offset",
+              message: "offset must be a non-negative integer.",
+              code: "INVALID_PARAMETER",
+            },
+          ],
+        });
+        return;
+      }
+
+      const result = await auditRepository.findAll(filters);
+
+      res.status(200).json({
+        ok: true,
+        events: result.events.map(formatEvent),
+        pagination: {
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+          has_more: result.offset + result.limit < result.total,
+        },
+      });
+    } catch (error) {
+      console.error("Error querying events:", error);
+
+      res.status(500).json({
+        ok: false,
+        events: [],
+        errors: [
+          {
+            field: null,
+            message: "An internal error occurred while querying events.",
+            code: "INTERNAL_ERROR",
+          },
+        ],
+      });
+    }
+  }
+
+  /**
    * GET /events/:id
    */
   async getEvent(req: Request, res: Response): Promise<void> {
@@ -57,7 +135,24 @@ export class AuditController {
         ? req.params.id[0]
         : req.params.id;
 
-      console.log(`Looking for event with id: ${id}`); // Debug log
+      // Validate UUID format before hitting the database
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(id)) {
+        res.status(404).json({
+          ok: false,
+          event: null,
+          errors: [
+            {
+              field: "id",
+              message: `Event with id '${id}' not found.`,
+              code: "NOT_FOUND",
+            },
+          ],
+        });
+        return;
+      }
 
       const event = await auditRepository.findById(id);
 
@@ -81,7 +176,6 @@ export class AuditController {
         event: formatEvent(event),
       });
     } catch (error) {
-      // Log the full error to see what's happening
       console.error("Error getting event:", error);
 
       res.status(500).json({
@@ -90,10 +184,7 @@ export class AuditController {
         errors: [
           {
             field: null,
-            message:
-              error instanceof Error
-                ? error.message
-                : "An internal error occurred.",
+            message: "An internal error occurred.",
             code: "INTERNAL_ERROR",
           },
         ],
