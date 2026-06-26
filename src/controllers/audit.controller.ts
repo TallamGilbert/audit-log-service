@@ -176,6 +176,76 @@ export class AuditController {
     }
   }
 
+  // Add this method to the AuditController class:
+
+  /**
+   * GET /events/:id/verify
+   * Verify the integrity of an event
+   */
+  async verifyEvent(req: Request, res: Response): Promise<void> {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+
+      // Validate UUID format
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(id)) {
+        res.status(404).json({
+          ok: false,
+          errors: [
+            {
+              field: "id",
+              message: `Event with id '${id}' not found.`,
+              code: "NOT_FOUND",
+            },
+          ],
+        });
+        return;
+      }
+
+      const event = await auditRepository.findById(id);
+
+      if (!event) {
+        res.status(404).json({
+          ok: false,
+          errors: [
+            {
+              field: "id",
+              message: `Event with id '${id}' not found.`,
+              code: "NOT_FOUND",
+            },
+          ],
+        });
+        return;
+      }
+
+      const isIntact = auditService.verifyEvent(event);
+
+      res.status(200).json({
+        ok: true,
+        event_id: event.id,
+        verified: isIntact,
+        status: isIntact ? "intact" : "tampered",
+      });
+    } catch (error) {
+      console.error("Error verifying event:", error);
+
+      res.status(500).json({
+        ok: false,
+        errors: [
+          {
+            field: null,
+            message: "An internal error occurred during verification.",
+            code: "INTERNAL_ERROR",
+          },
+        ],
+      });
+    }
+  }
+
   /**
    * GET /events/:id
    */

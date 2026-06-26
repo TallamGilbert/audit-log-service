@@ -5,7 +5,7 @@ import { eventSchema, bulkEventSchema } from "../middleware/validation";
 
 const router = Router();
 
-// POST /events/bulk - Record multiple events atomically (MUST be before /events)
+// POST /events/bulk - Record multiple events atomically
 router.post("/events/bulk", validateBody(bulkEventSchema), (req, res) => {
   auditController.createBulkEvents(req, res);
 });
@@ -20,11 +20,14 @@ router.get("/events", (req, res) => {
   auditController.queryEvents(req, res);
 });
 
+// GET /events/:id/verify - Verify event integrity (MUST be before /:id)
+router.get("/events/:id/verify", (req, res) => {
+  auditController.verifyEvent(req, res);
+});
+
 // GET /events/:id - Get a specific event
 router.get("/events/:id", (req, res) => {
   auditController.getEvent(req, res);
 });
-
-// Note: No PUT, PATCH, or DELETE routes!
 
 export default router;

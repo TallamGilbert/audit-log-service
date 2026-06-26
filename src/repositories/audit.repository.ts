@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, sql, count } from "drizzle-orm";
+import { eq, and, gte, lte, count } from "drizzle-orm";
 import { db } from "../db";
 import { auditEvents, AuditEvent, NewAuditEvent } from "../db/schema";
 
@@ -34,7 +34,6 @@ export class AuditRepository {
 
   /**
    * Create multiple events in an atomic transaction
-   * All succeed or all fail - no partial writes
    */
   async createBatch(
     events: Omit<NewAuditEvent, "id" | "createdAt">[],
@@ -53,6 +52,17 @@ export class AuditRepository {
 
       return created;
     });
+  }
+
+  /**
+   * Update the signature on an event
+   * Called after initial creation
+   */
+  async updateSignature(id: string, signature: string): Promise<void> {
+    await db
+      .update(auditEvents)
+      .set({ signature })
+      .where(eq(auditEvents.id, id));
   }
 
   /**
