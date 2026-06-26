@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { auditService } from "../services/audit.service";
 import { auditRepository } from "../repositories/audit.repository";
+import { eventSchema } from "../middleware/validation";
+import { z } from "zod";
 
 // Helper to format DB event to API response shape
 function formatEvent(event: any) {
@@ -48,8 +50,57 @@ export class AuditController {
   }
 
   /**
+   * POST /events/bulk
+   * Record multiple events atomically
+   */
+  async createBulkEvents(req: Request, res: Response): Promise<void> {
+    try {
+      const { events } = req.body;
+
+      // Validate each event individually to provide position-specific errors
+      for (let i = 0; i < events.length; i++) {
+        const result = eventSchema.safeParse(events[i]);
+
+        if (!result.success) {
+          const errors = result.error.issues.map((issue) => ({
+            field: `events[${i}].${issue.path.join(".")}`,
+            message: issue.message,
+            code: "VALIDATION_ERROR",
+          }));
+
+          res.status(400).json({
+            ok: false,
+            errors,
+          });
+          return;
+        }
+      }
+
+      const createdEvents = await auditService.recordBulk(events);
+
+      res.status(201).json({
+        ok: true,
+        events: createdEvents.map(formatEvent),
+        count: createdEvents.length,
+      });
+    } catch (error) {
+      console.error("Error creating bulk events:", error);
+
+      res.status(500).json({
+        ok: false,
+        errors: [
+          {
+            field: null,
+            message: "An internal error occurred while recording events.",
+            code: "INTERNAL_ERROR",
+          },
+        ],
+      });
+    }
+  }
+
+  /**
    * GET /events
-   * Query events with filters and pagination
    */
   async queryEvents(req: Request, res: Response): Promise<void> {
     try {
@@ -68,7 +119,6 @@ export class AuditController {
           : undefined,
       };
 
-      // Validate limit and offset if provided
       if (req.query.limit && (isNaN(filters.limit!) || filters.limit! < 1)) {
         res.status(400).json({
           ok: false,
@@ -135,7 +185,6 @@ export class AuditController {
         ? req.params.id[0]
         : req.params.id;
 
-      // Validate UUID format before hitting the database
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

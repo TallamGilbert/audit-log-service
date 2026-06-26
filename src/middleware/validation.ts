@@ -2,36 +2,12 @@ import { z } from "zod";
 import { Request, Response, NextFunction } from "express";
 import { ApiError } from "../types/event";
 
-// Define the event schema with Zod
+// Single event schema
 export const eventSchema = z.object({
-  actor_id: z
-    .string({
-      required_error: "actor_id is required.",
-      invalid_type_error: "actor_id must be a string.",
-    })
-    .min(1, "actor_id is required."),
-
-  action: z
-    .string({
-      required_error: "action is required.",
-      invalid_type_error: "action must be a string.",
-    })
-    .min(1, "action is required."),
-
-  resource_type: z
-    .string({
-      required_error: "resource_type is required.",
-      invalid_type_error: "resource_type must be a string.",
-    })
-    .min(1, "resource_type is required."),
-
-  resource_id: z
-    .string({
-      required_error: "resource_id is required.",
-      invalid_type_error: "resource_id must be a string.",
-    })
-    .min(1, "resource_id is required."),
-
+  actor_id: z.string().min(1, "actor_id is required."),
+  action: z.string().min(1, "action is required."),
+  resource_type: z.string().min(1, "resource_type is required."),
+  resource_id: z.string().min(1, "resource_id is required."),
   before_state: z.record(z.unknown()).optional(),
   after_state: z.record(z.unknown()).optional(),
   ip_address: z
@@ -41,7 +17,15 @@ export const eventSchema = z.object({
   user_agent: z.string().optional(),
 });
 
-// Transform Zod errors into our API error format
+// Bulk events schema
+export const bulkEventSchema = z.object({
+  events: z
+    .array(eventSchema)
+    .min(1, "At least one event is required.")
+    .max(100, "Batch size cannot exceed 100 events."),
+});
+
+// Transform Zod errors into API error format
 function formatZodErrors(error: z.ZodError): ApiError[] {
   return error.issues.map((issue) => ({
     field: issue.path.join("."),
@@ -55,6 +39,8 @@ function getErrorCode(message: string): string {
   if (message.includes("required")) return "MISSING_FIELD";
   if (message.includes("must be a string")) return "INVALID_TYPE";
   if (message.includes("IP address")) return "INVALID_FORMAT";
+  if (message.includes("Batch size")) return "BATCH_TOO_LARGE";
+  if (message.includes("At least one event")) return "EMPTY_BATCH";
   return "VALIDATION_ERROR";
 }
 
@@ -73,7 +59,6 @@ export function validateBody(schema: z.ZodSchema) {
       });
     }
 
-    // Replace request body with validated and typed data
     req.body = result.data;
     next();
   };

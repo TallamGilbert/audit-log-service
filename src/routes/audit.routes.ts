@@ -1,16 +1,21 @@
 import { Router } from "express";
 import { auditController } from "../controllers/audit.controller";
 import { validateBody } from "../middleware/validation";
-import { eventSchema } from "../middleware/validation";
+import { eventSchema, bulkEventSchema } from "../middleware/validation";
 
 const router = Router();
 
-// POST /events - Record an event
+// POST /events/bulk - Record multiple events atomically (MUST be before /events)
+router.post("/events/bulk", validateBody(bulkEventSchema), (req, res) => {
+  auditController.createBulkEvents(req, res);
+});
+
+// POST /events - Record a single event
 router.post("/events", validateBody(eventSchema), (req, res) => {
   auditController.createEvent(req, res);
 });
 
-// GET /events - Query events (MUST be before /:id to avoid conflict)
+// GET /events - Query events
 router.get("/events", (req, res) => {
   auditController.queryEvents(req, res);
 });

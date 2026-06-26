@@ -7,8 +7,8 @@ export interface QueryFilters {
   action?: string;
   resourceType?: string;
   resourceId?: string;
-  from?: string; // ISO 8601 date string
-  to?: string; // ISO 8601 date string
+  from?: string;
+  to?: string;
   limit?: number;
   offset?: number;
 }
@@ -33,6 +33,29 @@ export class AuditRepository {
   }
 
   /**
+   * Create multiple events in an atomic transaction
+   * All succeed or all fail - no partial writes
+   */
+  async createBatch(
+    events: Omit<NewAuditEvent, "id" | "createdAt">[],
+  ): Promise<AuditEvent[]> {
+    return db.transaction(async (tx) => {
+      const created: AuditEvent[] = [];
+
+      for (const eventData of events) {
+        const [event] = await tx
+          .insert(auditEvents)
+          .values(eventData)
+          .returning();
+
+        created.push(event);
+      }
+
+      return created;
+    });
+  }
+
+  /**
    * Find event by ID
    */
   async findById(id: string): Promise<AuditEvent | undefined> {
@@ -50,7 +73,6 @@ export class AuditRepository {
   async findAll(filters: QueryFilters = {}): Promise<QueryResult> {
     const conditions = [];
 
-    // Build WHERE conditions from filters
     if (filters.actorId) {
       conditions.push(eq(auditEvents.actorId, filters.actorId));
     }
@@ -67,7 +89,6 @@ export class AuditRepository {
       conditions.push(eq(auditEvents.resourceId, filters.resourceId));
     }
 
-    // Date range filtering
     if (filters.from) {
       conditions.push(gte(auditEvents.createdAt, new Date(filters.from)));
     }
@@ -76,15 +97,12 @@ export class AuditRepository {
       conditions.push(lte(auditEvents.createdAt, new Date(filters.to)));
     }
 
-    // Combine all conditions with AND
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // Set pagination defaults
     const limit =
       filters.limit && filters.limit > 0 ? Math.min(filters.limit, 100) : 50;
     const offset = filters.offset && filters.offset >= 0 ? filters.offset : 0;
 
-    // Get total count (with same filters)
     const [countResult] = await db
       .select({ count: count() })
       .from(auditEvents)
@@ -92,12 +110,11 @@ export class AuditRepository {
 
     const total = Number(countResult.count);
 
-    // Get paginated results
     const events = await db
       .select()
       .from(auditEvents)
       .where(whereClause)
-      .orderBy(auditEvents.createdAt) // Oldest first
+      .orderBy(auditEvents.createdAt)
       .limit(limit)
       .offset(offset);
 
@@ -119,5 +136,4 @@ export class AuditRepository {
   }
 }
 
-// Singleton instance
 export const auditRepository = new AuditRepository();
