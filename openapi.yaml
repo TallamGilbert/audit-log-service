@@ -1,0 +1,400 @@
+
+openapi: 3.0.3
+info:
+  title: Immutable Audit Log Service
+  description: |
+    A write-only REST API for recording immutable audit events.
+    Events can be created and queried but never updated or deleted through the API.
+    Each event is cryptographically signed to detect tampering.
+  version: 1.0.0
+  contact:
+    name: Audit Log Team
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns server and database status
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  database:
+                    type: string
+                    example: connected
+                  timestamp:
+                    type: string
+                    format: date-time
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /events:
+    post:
+      summary: Record a single audit event
+      description: |
+        Records one audit event. The server assigns id and timestamp.
+        Client-supplied id or timestamp are ignored.
+      operationId: createEvent
+      tags:
+        - Events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+      responses:
+        '201':
+          description: Event recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventSuccessResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          description: Method not allowed (write-only enforcement)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: Query audit events
+      description: Retrieve events with optional filtering and pagination
+      operationId: queryEvents
+      tags:
+        - Events
+      parameters:
+        - name: actor_id
+          in: query
+          description: Filter by actor
+          schema:
+            type: string
+        - name: action
+          in: query
+          description: Filter by action
+          schema:
+            type: string
+        - name: resource_type
+          in: query
+          description: Filter by resource type
+          schema:
+            type: string
+        - name: resource_id
+          in: query
+          description: Filter by resource ID
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Start date (ISO 8601)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: End date (ISO 8601)
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          description: Events per page (max 100, default 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          description: Events to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /events/bulk:
+    post:
+      summary: Record events in bulk
+      description: |
+        Records up to 100 events atomically. All succeed or all fail.
+        Each event gets its own id and timestamp.
+      operationId: createBulkEvents
+      tags:
+        - Events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - events
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    $ref: '#/components/schemas/EventInput'
+      responses:
+        '201':
+          description: All events recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkSuccessResponse'
+        '400':
+          description: Validation error or batch too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /events/{id}:
+    get:
+      summary: Get event by ID
+      description: Retrieve a single audit event
+      operationId: getEvent
+      tags:
+        - Events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Event UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Event found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventSuccessResponse'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /events/{id}/verify:
+    get:
+      summary: Verify event integrity
+      description: |
+        Recomputes the HMAC signature and checks if the event 
+        has been tampered with at the database level.
+      operationId: verifyEvent
+      tags:
+        - Events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Event UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  event_id:
+                    type: string
+                    format: uuid
+                  verified:
+                    type: boolean
+                    description: Whether the event is intact
+                  status:
+                    type: string
+                    enum:
+                      - intact
+                      - tampered
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    EventInput:
+      type: object
+      required:
+        - actor_id
+        - action
+        - resource_type
+        - resource_id
+      properties:
+        actor_id:
+          type: string
+          description: Who performed the action
+          example: user-123
+        action:
+          type: string
+          description: What they did
+          example: delete
+        resource_type:
+          type: string
+          description: The kind of thing acted on
+          example: invoice
+        resource_id:
+          type: string
+          description: Which specific thing
+          example: inv-456
+        before_state:
+          type: object
+          description: Data before the change
+        after_state:
+          type: object
+          description: Data after the change
+        ip_address:
+          type: string
+          format: ipv4
+          description: Request origin IP
+        user_agent:
+          type: string
+          description: Client identifier
+
+    AuditEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventInput'
+        - type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Server-assigned unique ID
+            timestamp:
+              type: string
+              format: date-time
+              description: Server-assigned creation time (ISO 8601)
+
+    EventSuccessResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        event:
+          $ref: '#/components/schemas/AuditEvent'
+
+    BulkSuccessResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        count:
+          type: integer
+          description: Number of events recorded
+
+    QueryResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total matching events
+            limit:
+              type: integer
+              description: Events per page
+            offset:
+              type: integer
+              description: Current offset
+            has_more:
+              type: boolean
+              description: Whether more pages exist
+
+    ApiError:
+      type: object
+      properties:
+        field:
+          type: string
+          nullable: true
+          description: The field that caused the error
+        message:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        event:
+          type: object
+          nullable: true
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiError'
+
+tags:
+  - name: Events
+    description: Audit event operations
+  - name: Health
+    description: Service health check
